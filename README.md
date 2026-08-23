@@ -4,7 +4,9 @@ A clean-room Chrome Manifest V3 extension for saving media that the current user
 
 ## Download
 
-[Download the packaged Chrome extension](releases/whop-media-saver-0.1.0-chrome.zip), then unzip it and load the extracted folder from `chrome://extensions` with Developer mode enabled.
+### [Download Whop Media Saver for Chrome (.zip)](https://github.com/Dovzy7/whop-downloader/releases/download/v0.1.0/whop-media-saver-0.1.0-chrome.zip)
+
+The download starts immediately. Unzip it, then load the extracted folder from `chrome://extensions` with Developer mode enabled.
 
 ## Current MVP
 
