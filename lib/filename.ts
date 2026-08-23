@@ -2,6 +2,7 @@ const EXTENSION_BY_KIND = {
   direct: '.mp4',
   hls: '.mp4',
   dash: '.mp4',
+  blob: '.mp4',
 } as const;
 
 export function sanitizeFilename(value: string, fallback = 'whop-video'): string {

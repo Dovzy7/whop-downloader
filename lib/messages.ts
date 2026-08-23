@@ -1,6 +1,9 @@
 export const MESSAGE = {
   scanMedia: 'SCAN_MEDIA',
+  reportFrameMedia: 'REPORT_FRAME_MEDIA',
+  getTabMedia: 'GET_TAB_MEDIA',
   startDownload: 'START_DOWNLOAD',
+  downloadBlob: 'DOWNLOAD_BLOB',
   downloadProgress: 'DOWNLOAD_PROGRESS',
   downloadComplete: 'DOWNLOAD_COMPLETE',
   downloadFailed: 'DOWNLOAD_FAILED',
@@ -9,16 +12,28 @@ export const MESSAGE = {
   pingOffscreen: 'PING_OFFSCREEN',
 } as const;
 
-export type MediaKind = 'direct' | 'hls' | 'dash';
+export type MediaKind = 'direct' | 'hls' | 'dash' | 'blob';
+
+export type MediaSource =
+  | 'video'
+  | 'source'
+  | 'mux-player'
+  | 'mux-video'
+  | 'metadata'
+  | 'network'
+  | 'performance'
+  | 'closed-shadow'
+  | 'blob';
 
 export interface MediaItem {
   id: string;
   title: string;
   url: string;
   kind: MediaKind;
-  source: 'video' | 'source' | 'mux-player' | 'mux-video' | 'metadata';
+  source: MediaSource;
   poster?: string;
   duration?: number;
+  frameId?: number;
 }
 
 export interface ScanMediaMessage {
@@ -32,9 +47,28 @@ export interface ScanMediaResponse {
   error?: string;
 }
 
+export interface ReportFrameMediaMessage {
+  type: typeof MESSAGE.reportFrameMedia;
+  media: MediaItem[];
+  pageTitle: string;
+  pageUrl: string;
+}
+
+export interface GetTabMediaMessage {
+  type: typeof MESSAGE.getTabMedia;
+  tabId: number;
+}
+
 export interface StartDownloadMessage {
   type: typeof MESSAGE.startDownload;
   item: MediaItem;
+  tabId?: number;
+}
+
+export interface DownloadBlobMessage {
+  type: typeof MESSAGE.downloadBlob;
+  url: string;
+  filename: string;
 }
 
 export interface DownloadStartedResponse {
@@ -88,6 +122,6 @@ export function isMediaItem(value: unknown): value is MediaItem {
     typeof item.id === 'string' &&
     typeof item.title === 'string' &&
     typeof item.url === 'string' &&
-    ['direct', 'hls', 'dash'].includes(item.kind ?? '')
+    ['direct', 'hls', 'dash', 'blob'].includes(item.kind ?? '')
   );
 }

@@ -198,17 +198,22 @@ async function processHls(message: ProcessHlsMessage): Promise<void> {
   }
 }
 
-browser.runtime.onMessage.addListener((message: unknown, sender) => {
+browser.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
   if (sender.id !== browser.runtime.id || !message || typeof message !== 'object') return;
   const typed = message as { type?: string; jobId?: string };
 
-  if (typed.type === MESSAGE.pingOffscreen) return Promise.resolve({ ready: true });
+  if (typed.type === MESSAGE.pingOffscreen) {
+    sendResponse({ ready: true });
+    return;
+  }
   if (typed.type === MESSAGE.processHls) {
     void processHls(message as ProcessHlsMessage);
-    return Promise.resolve({ accepted: true });
+    sendResponse({ accepted: true });
+    return;
   }
   if (typed.type === MESSAGE.cancelHls && typed.jobId) {
     activeJobs.get(typed.jobId)?.abort();
-    return Promise.resolve({ cancelled: true });
+    sendResponse({ cancelled: true });
+    return;
   }
 });

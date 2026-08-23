@@ -30,7 +30,8 @@ function formatDuration(seconds?: number): string | null {
 
 function formatSource(url: string): string {
   try {
-    return new URL(url).hostname.replace(/^www\./, '');
+    const parsed = new URL(url);
+    return parsed.protocol === 'blob:' ? 'current page' : parsed.hostname.replace(/^www\./, '');
   } catch {
     return 'media';
   }
@@ -39,6 +40,7 @@ function formatSource(url: string): string {
 function kindLabel(item: MediaItem): string {
   if (item.kind === 'hls') return 'HLS';
   if (item.kind === 'dash') return 'DASH';
+  if (item.kind === 'blob') return 'BLOB';
   try {
     return new URL(item.url).pathname.split('.').pop()?.toUpperCase() || 'VIDEO';
   } catch {
@@ -49,6 +51,7 @@ function kindLabel(item: MediaItem): string {
 export default function App() {
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [jobs, setJobs] = useState<Record<string, JobState>>({});
+  const [activeTabId, setActiveTabId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [pageTitle, setPageTitle] = useState('Current Whop page');
   const [error, setError] = useState<string | null>(null);
@@ -63,8 +66,10 @@ export default function App() {
         throw new Error('Open a Whop page, then run the scan again.');
       }
 
-      const response = (await browser.tabs.sendMessage(tab.id, {
-        type: MESSAGE.scanMedia,
+      setActiveTabId(tab.id);
+      const response = (await browser.runtime.sendMessage({
+        type: MESSAGE.getTabMedia,
+        tabId: tab.id,
       })) as ScanMediaResponse;
       if (!response?.success) throw new Error(response?.error || 'The page scan failed.');
       setMedia(response.media);
@@ -72,6 +77,7 @@ export default function App() {
     } catch (scanError) {
       const message = scanError instanceof Error ? scanError.message : String(scanError);
       setMedia([]);
+      setActiveTabId(null);
       setError(
         /receiving end does not exist|could not establish connection/i.test(message)
           ? 'Reload the Whop tab once so the extension can connect, then scan again.'
@@ -148,6 +154,7 @@ export default function App() {
       const response = (await browser.runtime.sendMessage({
         type: MESSAGE.startDownload,
         item,
+        tabId: activeTabId ?? undefined,
       })) as DownloadStartedResponse;
       if (!response?.success) throw new Error(response?.error || 'Download could not be started.');
       setJobs((current) => ({

@@ -46,7 +46,7 @@ segment-2.m4s
     });
   });
 
-  it('marks encrypted and byte-range playlists as unsupported', () => {
+  it('detects encrypted and byte-range playlist features', () => {
     const playlist = `#EXTM3U
 #EXT-X-KEY:METHOD=AES-128,URI="key.bin"
 #EXT-X-BYTERANGE:1024@0

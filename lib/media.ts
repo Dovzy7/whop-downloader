@@ -3,6 +3,7 @@ import type { MediaItem, MediaKind } from './messages';
 const DIRECT_MEDIA_EXTENSION = /\.(?:mp4|m4v|mov|webm|mpeg|mpg)(?:$|[?#])/i;
 
 export function classifyMediaUrl(url: string): MediaKind | null {
+  if (String(url || '').trim().startsWith('blob:')) return 'blob';
   const normalized = normalizeMediaUrl(url);
   if (!normalized) return null;
   const lower = normalized.toLowerCase();
@@ -14,7 +15,17 @@ export function classifyMediaUrl(url: string): MediaKind | null {
 
 export function normalizeMediaUrl(value: string, base = globalThis.location?.href): string | null {
   const candidate = String(value || '').trim();
-  if (!candidate || candidate.startsWith('blob:') || candidate.startsWith('data:')) return null;
+  if (!candidate || candidate.startsWith('data:')) return null;
+
+  if (candidate.startsWith('blob:')) {
+    try {
+      const embeddedUrl = new URL(candidate.slice('blob:'.length));
+      if (embeddedUrl.protocol !== 'https:') return null;
+      return candidate;
+    } catch {
+      return null;
+    }
+  }
 
   try {
     const url = new URL(candidate, base);

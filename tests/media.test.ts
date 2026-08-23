@@ -10,8 +10,10 @@ describe('media helpers', () => {
     expect(classifyMediaUrl('https://stream.example.com/page')).toBeNull();
   });
 
-  it('rejects blob, data, and insecure URLs', () => {
-    expect(normalizeMediaUrl('blob:https://whop.com/123')).toBeNull();
+  it('accepts secure Blob URLs and rejects data and insecure URLs', () => {
+    expect(normalizeMediaUrl('blob:https://whop.com/123')).toBe('blob:https://whop.com/123');
+    expect(classifyMediaUrl('blob:https://whop.com/123')).toBe('blob');
+    expect(normalizeMediaUrl('blob:http://whop.com/123')).toBeNull();
     expect(normalizeMediaUrl('data:video/mp4;base64,abc')).toBeNull();
     expect(normalizeMediaUrl('http://example.com/video.mp4')).toBeNull();
   });
@@ -37,5 +39,6 @@ describe('media helpers', () => {
     expect(filenameForMedia('Lesson 1', 'direct', 'https://cdn.example.com/movie.webm')).toBe(
       'Lesson 1.webm',
     );
+    expect(filenameForMedia('Recorded lesson', 'blob')).toBe('Recorded lesson.mp4');
   });
 });

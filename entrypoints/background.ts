@@ -6,8 +6,11 @@ import {
   type DownloadCompleteMessage,
   type DownloadFailedMessage,
   type DownloadProgressMessage,
+  type GetTabMediaMessage,
   type MediaItem,
   type ProcessHlsMessage,
+  type ReportFrameMediaMessage,
+  type ScanMediaResponse,
   type StartDownloadMessage,
 } from '../lib/messages';
 
@@ -17,7 +20,15 @@ interface DirectDownloadJob {
   filename: string;
 }
 
+interface FrameMediaSnapshot {
+  media: MediaItem[];
+  pageTitle: string;
+  pageUrl: string;
+  updatedAt: number;
+}
+
 const directJobs = new Map<number, DirectDownloadJob>();
+const tabFrameMedia = new Map<number, Map<number, FrameMediaSnapshot>>();
 let creatingOffscreenDocument: Promise<void> | null = null;
 let offscreenCloseTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -113,13 +124,85 @@ async function startHlsDownload(item: MediaItem, jobId: string): Promise<void> {
   await browser.runtime.sendMessage(message);
 }
 
+async function startBlobDownload(item: MediaItem, tabId: number, jobId: string): Promise<void> {
+  if (!item.url.startsWith('blob:')) throw new Error('Invalid Blob media URL.');
+  if (!Number.isInteger(item.frameId)) throw new Error('The Blob media frame is unavailable.');
+  const filename = filenameForMedia(item.title, 'blob', item.url);
+  const response = (await browser.tabs.sendMessage(
+    tabId,
+    { type: MESSAGE.downloadBlob, url: item.url, filename },
+    { frameId: item.frameId },
+  )) as { success?: boolean; error?: string } | undefined;
+  if (!response?.success) throw new Error(response?.error || 'The page could not save this Blob.');
+
+  const complete: DownloadCompleteMessage = {
+    type: MESSAGE.downloadComplete,
+    jobId,
+    mediaId: item.id,
+    filename,
+  };
+  await browser.runtime.sendMessage(complete).catch(() => undefined);
+}
+
+function recordFrameMedia(message: ReportFrameMediaMessage, tabId: number, frameId: number) {
+  const media = (Array.isArray(message.media) ? message.media : [])
+    .filter(isMediaItem)
+    .slice(0, 250)
+    .map((item) => ({ ...item, frameId }));
+  let frames = tabFrameMedia.get(tabId);
+  if (!frames) {
+    frames = new Map();
+    tabFrameMedia.set(tabId, frames);
+  }
+  frames.set(frameId, {
+    media,
+    pageTitle: String(message.pageTitle || '').slice(0, 300),
+    pageUrl: String(message.pageUrl || '').slice(0, 2_000),
+    updatedAt: Date.now(),
+  });
+  return { success: true };
+}
+
+async function getTabMedia(message: GetTabMediaMessage): Promise<ScanMediaResponse> {
+  const tabId = Number(message.tabId);
+  if (!Number.isInteger(tabId)) {
+    return { success: false, media: [], pageTitle: '', error: 'Invalid tab.' };
+  }
+
+  await browser.tabs.sendMessage(tabId, { type: MESSAGE.scanMedia }).catch(() => undefined);
+  await new Promise((resolve) => setTimeout(resolve, 220));
+
+  const frames = tabFrameMedia.get(tabId);
+  if (!frames?.size) return { success: true, media: [], pageTitle: '' };
+  const merged = new Map<string, MediaItem>();
+  const orderedFrames = [...frames.entries()].sort(([left], [right]) => left - right);
+  for (const [, snapshot] of orderedFrames) {
+    if (Date.now() - snapshot.updatedAt > 10 * 60_000) continue;
+    for (const item of snapshot.media) {
+      const existing = merged.get(item.id);
+      if (!existing || (!existing.poster && item.poster)) merged.set(item.id, item);
+    }
+  }
+
+  const topFrame = frames.get(0);
+  const pageTitle = topFrame?.pageTitle || orderedFrames[0]?.[1].pageTitle || '';
+  return { success: true, media: [...merged.values()], pageTitle };
+}
+
 async function handleStartDownload(message: StartDownloadMessage) {
   if (!isMediaItem(message.item)) return { success: false, error: 'Invalid media request.' };
 
   const item = message.item;
   const jobId = createJobId();
-  assertDownloadableUrl(item.url);
+  if (item.kind === 'blob') {
+    if (!Number.isInteger(message.tabId)) {
+      return { success: false, error: 'The active Whop tab is unavailable.' };
+    }
+    await startBlobDownload(item, Number(message.tabId), jobId);
+    return { success: true, jobId };
+  }
 
+  assertDownloadableUrl(item.url);
   if (item.kind === 'dash') {
     return { success: false, error: 'DASH downloads are not supported in this first build.' };
   }
@@ -130,19 +213,48 @@ async function handleStartDownload(message: StartDownloadMessage) {
 }
 
 export default defineBackground(() => {
-  browser.runtime.onMessage.addListener((message: unknown, sender) => {
+  browser.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
     if (sender.id !== browser.runtime.id || !message || typeof message !== 'object') return;
     const typed = message as { type?: string };
+
+    if (typed.type === MESSAGE.reportFrameMedia) {
+      if (sender.tab?.id === undefined) {
+        sendResponse({ success: false });
+        return;
+      }
+      sendResponse(
+        recordFrameMedia(message as ReportFrameMediaMessage, sender.tab.id, sender.frameId ?? 0),
+      );
+      return;
+    }
+    if (typed.type === MESSAGE.getTabMedia) {
+      void getTabMedia(message as GetTabMediaMessage)
+        .then(sendResponse)
+        .catch((error: unknown) =>
+          sendResponse({
+            success: false,
+            media: [],
+            pageTitle: '',
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      return true;
+    }
     if (typed.type === MESSAGE.downloadComplete || typed.type === MESSAGE.downloadFailed) {
       scheduleOffscreenClose();
       return;
     }
     if (typed.type !== MESSAGE.startDownload) return;
 
-    return handleStartDownload(message as StartDownloadMessage).catch((error: unknown) => ({
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    }));
+    void handleStartDownload(message as StartDownloadMessage)
+      .then(sendResponse)
+      .catch((error: unknown) =>
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    return true;
   });
 
   browser.downloads.onChanged.addListener((delta) => {
@@ -171,4 +283,9 @@ export default defineBackground(() => {
       void browser.runtime.sendMessage(message).catch(() => undefined);
     }
   });
+
+  browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.status === 'loading' || changeInfo.url) tabFrameMedia.delete(tabId);
+  });
+  browser.tabs.onRemoved.addListener((tabId) => tabFrameMedia.delete(tabId));
 });
